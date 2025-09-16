@@ -1,59 +1,54 @@
-﻿using Microsoft.AspNetCore.Mvc; // Importa atributos y tipos base para construir controladores y manejar HTTP.
-// Nota: el controlador es el "mesero" del restaurante; es la ÚNICA capa que habla con el mundo exterior (HTTP).
-using MiPrimeraAPI.application.Service; // El controlador conoce solamente el CONTRATO (interfaz) del servicio: el "menú".
-using MiPrimeraAPI.domain.Entity;       // El tipo de datos que viaja en las respuestas (y que entiende el servicio/la cocina).
-using MiPrimeraAPI.adapter.restful.v1.dto; // DTOs de entrada/salida propios de la capa de transporte (puertas del castillo).
+﻿using AutoMapper;
+using Microsoft.AspNetCore.Mvc;
+using MiPrimeraAPI.application.Service;
+using MiPrimeraAPI.domain.Entity;
+using MiPrimeraAPI.adapter.restful.v1.dto;
 
-namespace MiPrimeraAPI.adapter.restful.v1.controller; // Organiza las "puertas" (endpoints) bajo un espacio lógico.
+namespace MiPrimeraAPI.adapter.restful.v1.controller;
 
-// [ApiController] activa validación automática del modelo y respuestas 400 si fallan,
-// además de ayudar con el binding de parámetros. Es como tener un "bouncer" que revisa la entrada.
+// Este controlador es el "mesero" profesional del restaurante.
+// Ahora, gracias a Validación, DTOs y AutoMapper, el mesero puede:
+// 1. Dejar pasar solo pedidos válidos (el "bouncer" revisa los DTOs con reglas de validación).
+// 2. Recibir y entregar "menús" (DTOs) en vez de recetas secretas (entidades de dominio).
+// 3. Usar el "traductor universal" (AutoMapper) para convertir entre menús y recetas sin esfuerzo manual.
 [ApiController]
-// Define la ruta base para este controlador.
-// [controller] se reemplaza por "Todo" (nombre de la clase sin "Controller").
-// Esto crea la puerta del castillo por donde entran las peticiones REST de Todo.
 [Route("api/v1/[controller]")]
-public class TodoController : ControllerBase // Hereda utilidades para construir respuestas HTTP (Ok, NotFound, etc.).
+public class TodoController : ControllerBase
 {
-    // Dependencia principal del controlador: el contrato del servicio de tareas (el "menú").
-    // readonly: se asigna en el constructor y no cambia su referencia -> fortaleza del acoplamiento débil.
+    // El mesero ahora tiene acceso tanto al menú (servicio de tareas) como al traductor universal (AutoMapper).
     private readonly ITodoService _todoService;
+    private readonly IMapper _mapper;
 
-    /// <summary>
-    /// Constructor donde el framework inyecta una implementación de ITodoService.
-    /// Por qué: en la arquitectura hexagonal, el mesero solo conoce el MENÚ (interfaz),
-    /// no la cocina concreta. El contenedor de DI trae la cocina real desde Program.cs.
-    /// </summary>
-    /// <param name="todoService">Instancia provista por el contenedor de DI.</param>
-    public TodoController(ITodoService todoService)
+    // El constructor recibe el menú (servicio) y el traductor universal (AutoMapper).
+    // Así, el mesero puede traducir cualquier pedido del cliente a la receta secreta y viceversa, de forma profesional y automática.
+    public TodoController(ITodoService todoService, IMapper mapper)
     {
-        // Guardamos la dependencia para usarla en cada "orden" (acción).
         _todoService = todoService;
+        _mapper = mapper;
     }
 
-    // Acción HTTP GET sin parámetros: devuelve todas las tareas.
-    // Flujo: Cliente -> Mesero (este método) -> Menú (ITodoService.GetAllTodos) -> Cocina (impl) -> Bibliotecario (DB) -> Respuesta.
-    // Ruta efectiva: GET api/v1/Todo
+    // --- FLUJO PROFESIONAL DE UNA PETICIÓN HTTP ---
+    // 1. El cliente hace una petición (por ejemplo, GET, POST, etc.).
+    // 2. El "bouncer" (validación automática) revisa el DTO de entrada (si aplica).
+    // 3. El mesero (controller) recibe el DTO y, si es necesario, lo traduce a la receta secreta (entidad de dominio) usando AutoMapper.
+    // 4. El mesero pasa la receta a la cocina (servicio de dominio).
+    // 5. La cocina responde con una receta secreta, que el mesero traduce de vuelta a un DTO para el cliente.
+
+    // --- ACCIÓN: Obtener todas las tareas ---
+    // GET api/v1/Todo
+    // El mesero pide todas las recetas a la cocina, las traduce a menús y las entrega al cliente.
     [HttpGet]
     public IActionResult GetAll()
     {
         var todoItems = _todoService.GetAllTodos();
-        
-        // Proceso de "Mapeo": Convertimos la lista de entidades internas (TodoItem)
-        // a una lista de DTOs publicos (TodoItemDto).
-
-        var todoDtos = todoItems.Select(item => new TodoItemDto
-        {
-            Id = item.Id,
-            Title = item.Title,
-            IsComplete = item.IsComplete
-        }).ToList();
-        
+        // Traducción automática: de recetas secretas (TodoItem) a menús públicos (TodoItemDto).
+        var todoDtos = _mapper.Map<List<TodoItemDto>>(todoItems);
         return Ok(todoDtos);
     }
 
-    // Acción HTTP GET con parámetro de ruta: obtiene una tarea por id.
-    // Ruta efectiva: GET api/v1/Todo/{id}
+    // --- ACCIÓN: Obtener una tarea por id ---
+    // GET api/v1/Todo/{id}
+    // El mesero busca la receta por id, la traduce a menú y la entrega al cliente.
     [HttpGet("{id}")]
     public IActionResult GetById(long id)
     {
@@ -62,70 +57,48 @@ public class TodoController : ControllerBase // Hereda utilidades para construir
         {
             return NotFound();
         }
-        
-        // Mapeo del objeto encontrado a su version DTO.
-        var todoDto = new TodoItemDto
-        {
-            Id = todoItem.Id,
-            Title = todoItem.Title,
-            IsComplete = todoItem.IsComplete
-        };
-            return Ok(todoDto);
+        var todoDto = _mapper.Map<TodoItemDto>(todoItem);
+        return Ok(todoDto);
     }
 
-    // Acción HTTP POST: crea una nueva tarea.
-    // Ruta efectiva: POST api/v1/Todo
+    // --- ACCIÓN: Crear una nueva tarea ---
+    // POST api/v1/Todo
+    // El cliente entrega un pedido usando el menú de entrada (CreateTodoDto).
+    // El bouncer revisa que el pedido sea válido (validación automática).
+    // El mesero traduce el pedido a receta secreta (TodoItem), lo pasa a la cocina, y luego traduce la respuesta a menú de salida (TodoItemDto).
     [HttpPost]
-    public IActionResult Create([FromBody] TodoItem createDto)
+    public IActionResult Create([FromBody] CreateTodoDto createDto)
     {
-        // Mapeo inverso: Convertimos el DTO que llega del cliente a una entidad 'TodoItem'
-        // que uestra logica de negocio y base de datos entienden.
-        var todoItem = new TodoItem
-        {
-            Title = createDto.Title,
-            IsComplete = createDto.IsComplete
-        };
-
+        // Traducción automática: del menú de entrada (CreateTodoDto) a receta secreta (TodoItem).
+        var todoItem = _mapper.Map<TodoItem>(createDto);
         var createdTodo = _todoService.CreateTodo(todoItem);
-        
-        // Creamos un DTO para la respuesta, para mostrarle al cliente el objeto completo con su nuevo Id.
-        var responseDto = new TodoItemDto
-        {
-            Id = createdTodo.Id,
-            Title = createdTodo.Title,
-            IsComplete = createdTodo.IsComplete
-        };
-
+        // Traducción automática: de receta secreta a menú de salida (TodoItemDto).
+        var responseDto = _mapper.Map<TodoItemDto>(createdTodo);
         return CreatedAtAction(nameof(GetById), new { id = responseDto.Id }, responseDto);
-
     }
 
-    // Acción HTTP PUT: reemplaza el estado de una tarea existente.
-    // Ruta efectiva: PUT api/v1/Todo/{id}
+    // --- ACCIÓN: Actualizar una tarea existente ---
+    // PUT api/v1/Todo/{id}
+    // El cliente entrega un menú de entrada (TodoItemDto o CreateTodoDto).
+    // El bouncer revisa la validez.
+    // El mesero busca la receta original, aplica los cambios usando el traductor universal, y la cocina actualiza la base.
     [HttpPut("{id}")]
-    public IActionResult Update(long id, [FromBody] TodoItem updatedDto)
+    public IActionResult Update(long id, [FromBody] CreateTodoDto updatedDto)
     {
-        // Para la actualizacion, no pasamos el DTO directamente al servicio.
-        // Primero, obtenemos la entidad real de la base de datos.
         var existingTodo = _todoService.GetTodoById(id);
         if (existingTodo == null)
         {
-            // Si no existe, 404.
             return NotFound();
         }
-        
-        // Actualizamos la entidad que ya existe con los nuevos datos del DTO.
-        existingTodo.Title = updatedDto.Title;
-        existingTodo.IsComplete = updatedDto.IsComplete;
-        
-        // Pasamos la entidad ya actualizada al servicio para que la guarde.
+        // Traducción automática: aplica los cambios del menú de entrada a la receta secreta existente.
+        _mapper.Map(updatedDto, existingTodo);
         _todoService.UpdateTodo(id, existingTodo);
-
-        return NoContent(); // No content es la respuesta estandar para un PUT existoso.
+        return NoContent();
     }
 
-    // Acción HTTP DELETE: elimina una tarea por id.
-    // Ruta efectiva: DELETE api/v1/Todo/{id}
+    // --- ACCIÓN: Eliminar una tarea ---
+    // DELETE api/v1/Todo/{id}
+    // El mesero verifica que la receta exista y le pide a la cocina que la elimine.
     [HttpDelete("{id}")]
     public IActionResult Delete(long id)
     {
@@ -134,7 +107,6 @@ public class TodoController : ControllerBase // Hereda utilidades para construir
         {
             return NotFound();
         }
-        
         _todoService.DeleteTodo(id);
         return NoContent();
     }

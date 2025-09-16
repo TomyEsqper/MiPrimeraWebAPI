@@ -1,8 +1,8 @@
 ﻿using System.ComponentModel.DataAnnotations;
 
-// Este modelo es el "plano" o el "ADN" de una Tarea dentro del dominio.
-// Define la forma de los datos que viajan entre capas: controlador (mesero), servicio (cocina) y DbContext (bibliotecario).
-// Mantenerlo simple y neutral al transporte (HTTP/JSON) facilita su reutilización y pruebas.
+// Este modelo es la "receta secreta" de la cocina: solo la cocina (dominio y base de datos) la conoce y la entiende.
+// No se la mostramos directamente a los clientes (usuarios de la API), porque podría tener ingredientes o detalles internos.
+// Las reglas de validación más estrictas viven en los DTOs (el menú), pero aquí podemos poner reglas generales para la cocina.
 
 namespace MiPrimeraAPI.domain.Entity;
 
@@ -12,12 +12,8 @@ public class TodoItem
     // Identificador único de la tarea (clave primaria en la base).
     public long Id { get; set; }
 
-    // Título o descripción breve; opcional (puede ser null).
-    // Nota: las reglas de validación de entrada viven en el DTO (borde HTTP), no aquí.
-    
-    // [Required] es nuestra "etiqueta" o regla. Le dice a ASP.NET Core:
-    // "Antes de aceptar cualquier 'TodoItem' nuevo, asegúrate de que esta propiedad 'Title'
-    // exista y no sea nula o una cadena de texto vacía".
+    // El título es un ingrediente esencial, pero aquí solo ponemos reglas generales.
+    // Las reglas de validación estrictas (como 'obligatorio' o 'máximo de caracteres') se aplican en el DTO, en la puerta del restaurante.
     [Required (ErrorMessage = "El Titulo de la tarea es obligatorio.")]
     [MaxLength (100, ErrorMessage = "El Titulo no puede exceder los 100 caracteres.")]
     public string? Title { get; set; } 
