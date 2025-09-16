@@ -1,33 +1,38 @@
 ﻿using Microsoft.AspNetCore.Mvc; // Importa atributos y tipos base para construir controladores y manejar HTTP.
-using MiPrimeraAPI.application.Service; // El controlador conoce solamente el CONTRATO (interfaz) del servicio.
-using MiPrimeraAPI.domain.Entity; // Importa el modelo de datos que llega/sale en el cuerpo de las peticiones.
+// Nota: el controlador es el "mesero" del restaurante; es la ÚNICA capa que habla con el mundo exterior (HTTP).
+using MiPrimeraAPI.application.Service; // El controlador conoce solamente el CONTRATO (interfaz) del servicio: el "menú".
+using MiPrimeraAPI.domain.Entity;       // El tipo de datos que viaja en las respuestas (y que entiende el servicio/la cocina).
+using MiPrimeraAPI.adapter.restful.v1.dto; // DTOs de entrada/salida propios de la capa de transporte (puertas del castillo).
 
-namespace MiPrimeraAPI.adapter.restful.v1.controller; // Agrupa las clases en un espacio lógico y controla el nombre totalmente calificado.
+namespace MiPrimeraAPI.adapter.restful.v1.controller; // Organiza las "puertas" (endpoints) bajo un espacio lógico.
 
-// ApiController habilita funciones automáticas: validación de modelo, binding y respuestas 400 por defecto.
+// [ApiController] activa validación automática del modelo y respuestas 400 si fallan,
+// además de ayudar con el binding de parámetros. Es como tener un "bouncer" que revisa la entrada.
 [ApiController]
-// Define el patrón de ruta base para todas las acciones de este controlador.
+// Define la ruta base para este controlador.
 // [controller] se reemplaza por "Todo" (nombre de la clase sin "Controller").
-// Ejemplo: https://localhost:{puerto}/api/v1/Todo
+// Esto crea la puerta del castillo por donde entran las peticiones REST de Todo.
 [Route("api/v1/[controller]")]
 public class TodoController : ControllerBase // Hereda utilidades para construir respuestas HTTP (Ok, NotFound, etc.).
 {
-    // Dependencia principal del controlador: contrato del servicio de tareas.
-    // readonly: se asigna en el constructor y no cambia su referencia.
+    // Dependencia principal del controlador: el contrato del servicio de tareas (el "menú").
+    // readonly: se asigna en el constructor y no cambia su referencia -> fortaleza del acoplamiento débil.
     private readonly ITodoService _todoService;
 
     /// <summary>
     /// Constructor donde el framework inyecta una implementación de ITodoService.
-    /// Este patrón desacopla el controlador de la implementación concreta.
+    /// Por qué: en la arquitectura hexagonal, el mesero solo conoce el MENÚ (interfaz),
+    /// no la cocina concreta. El contenedor de DI trae la cocina real desde Program.cs.
     /// </summary>
     /// <param name="todoService">Instancia provista por el contenedor de DI.</param>
     public TodoController(ITodoService todoService)
     {
-        // Asignamos la dependencia inyectada al campo privado para usarla en las acciones.
+        // Guardamos la dependencia para usarla en cada "orden" (acción).
         _todoService = todoService;
     }
 
     // Acción HTTP GET sin parámetros: devuelve todas las tareas.
+    // Flujo: Cliente -> Mesero (este método) -> Menú (ITodoService.GetAllTodos) -> Cocina (impl) -> Bibliotecario (DB) -> Respuesta.
     // Ruta efectiva: GET api/v1/Todo
     [HttpGet]
     public IActionResult GetAll()
@@ -42,11 +47,11 @@ public class TodoController : ControllerBase // Hereda utilidades para construir
     [HttpGet("{id}")]
     public IActionResult GetById(long id)
     {
-        // Recupera el recurso desde el servicio.
+        // Recupera el recurso desde el servicio (la cocina pregunta al bibliotecario si existe).
         var todo = _todoService.GetTodoById(id);
         if (todo == null)
         {
-            // Si no existe, responde 404 Not Found.
+            // Si no existe, responde 404 Not Found (no hay plato con ese id).
             return NotFound();
         }
 
@@ -55,16 +60,27 @@ public class TodoController : ControllerBase // Hereda utilidades para construir
     }
 
     // Acción HTTP POST: crea una nueva tarea.
-    // El cuerpo de la petición (JSON) se mapea a TodoItem por [FromBody].
+    // Importante: ahora usamos un DTO (TodoCreateRequest) específico de entrada con validaciones.
+    // Por qué: el "bouncer" (validación de modelo de [ApiController]) puede revisar el pedido ANTES de llegar a la cocina.
     // Ruta efectiva: POST api/v1/Todo
     [HttpPost]
-    public IActionResult Create([FromBody] TodoItem newTodo)
+    public IActionResult Create([FromBody] TodoCreateRequest request)
     {
-        // Delegamos la creación al servicio (que asigna Id y persiste en la "DB" en memoria).
-        var createdTodo= _todoService.CreateTodo(newTodo);
+        // Con [ApiController], si request no cumple las DataAnnotations, ASP.NET Core devuelve 400 automáticamente
+        // con detalles de qué falló. Aquí ya llegamos con un pedido válido.
+        // Mapeamos el DTO (capa transporte) a la entidad de dominio que entiende la cocina (servicio).
+        var newTodo = new TodoItem
+        {
+            Title = request.Title,
+            IsComplete = request.IsComplete
+        };
+
+        // Delegamos la creación al servicio (la cocina); este puede asignar Id y pedir al bibliotecario que lo guarde.
+        var createdTodo = _todoService.CreateTodo(newTodo);
+
         // Devuelve 201 Created con cabecera Location apuntando al recurso recién creado.
         // CreatedAtAction usa la acción GetById y pasa el id del nuevo recurso en la ruta.
-        return CreatedAtAction(nameof(GetById), new {id = createdTodo.Id}, createdTodo);
+        return CreatedAtAction(nameof(GetById), new { id = createdTodo.Id }, createdTodo);
     }
 
     // Acción HTTP PUT: reemplaza el estado de una tarea existente.
@@ -80,8 +96,9 @@ public class TodoController : ControllerBase // Hereda utilidades para construir
             return NotFound();
         }
 
-        // Aplica los cambios en la capa de aplicación.
-        _todoService.UpdateTodo(id,updatedTodo);
+        // Aplica los cambios en la capa de aplicación (la cocina decide cómo actualizar y pide al bibliotecario persistir).
+        _todoService.UpdateTodo(id, updatedTodo);
+
         // 204 No Content indica éxito sin cuerpo de respuesta.
         return NoContent();
     }
@@ -91,7 +108,7 @@ public class TodoController : ControllerBase // Hereda utilidades para construir
     [HttpDelete("{id}")]
     public IActionResult Delete(long id)
     {
-        // Confirmamos que el recurso exista.
+        // Confirmamos que el recurso exista (no intentamos borrar un plato que no está en la carta).
         var existingTodo = _todoService.GetTodoById(id);
         if (existingTodo == null)
         {
@@ -99,8 +116,9 @@ public class TodoController : ControllerBase // Hereda utilidades para construir
             return NotFound();
         }
 
-        // Solicitamos la eliminación al servicio.
+        // Solicitamos la eliminación al servicio (la cocina coordina con el bibliotecario para quitarlo de los registros).
         _todoService.DeleteTodo(id);
+
         // 204 No Content confirma eliminación exitosa.
         return NoContent();
     }

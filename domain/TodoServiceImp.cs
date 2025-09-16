@@ -1,77 +1,76 @@
-﻿using System.Linq; // Extensiones LINQ para consultas a colecciones (FirstOrDefault, Any, Max).
-using MiPrimeraAPI.application.Service; // Importa el contrato que vamos a cumplir (ITodoService).
-using MiPrimeraAPI.domain.Entity;       // Importa el modelo de Tarea (TodoItem).
+﻿// Esta clase es la "cocina" del restaurante: cumple el contrato (ITodoService) y
+// contiene la lógica real para preparar las órdenes (casos de uso).
+// Mantiene el desacoplamiento delegando la persistencia al "bibliotecario" (TodoDbContext),
+// quien sabe cómo leer y escribir en la base de datos. Así, el controlador no sabe nada de la DB.
 
-namespace MiPrimeraAPI.domain; // Capa de dominio: implementación concreta de reglas/servicios.
+using MiPrimeraAPI.application.Service;
+using MiPrimeraAPI.domain.Entity;
+using MiPrimeraAPI.infrastructure; // Importa el DbContext
 
-// Implementación concreta del contrato ITodoService para gestionar tareas.
-public class TodoServiceImp : ITodoService
+namespace MiPrimeraAPI.domain
 {
-    // "Base de datos" en memoria para datos de demostración.
-    // private: solo esta clase puede acceder.
-    // static: única instancia compartida durante la vida de la app.
-    // readonly: no se puede reasignar la lista (sí modificar su contenido).
-    private static readonly List<TodoItem> _memoriaDB = new List<TodoItem>
+    public class TodoServiceImp : ITodoService
     {
-        // Datos de ejemplo para iniciar y probar el flujo end-to-end.
-        new TodoItem { Id = 1, Title = "Seguir el ejemplo del profe", IsComplete = true },
-        new TodoItem { Id = 2, Title = "Reorganizar carpetas", IsComplete = false },
-        new TodoItem { Id = 3, Title = "Probar la API en Swagger", IsComplete = false },
-        // Entradas duplicadas a propósito para ejercicios de prueba.
-        new TodoItem { Id = 1, Title = "Entender el problema de nombres", IsComplete = true },
-        new TodoItem { Id = 2, Title = "Reemplazar los archivos", IsComplete = true },
-        new TodoItem { Id = 3, Title = "Probar en Swagger OTRA VEZ!", IsComplete = false }
-    };
+        // Dependencia clave: el DbContext es nuestro bibliotecario experto.
+        private readonly TodoDbContext _context;
 
-    // Devuelve todas las tareas almacenadas.
-    public List<TodoItem> GetAllTodos()
-    {
-        // En una app real, aquí se consultaría una base de datos o un repositorio.
-        return _memoriaDB; 
-    }
-
-    // Busca un elemento por Id; puede devolver null si no existe.
-    public TodoItem? GetTodoById(long id)
-    {
-        // LINQ recorre la colección y devuelve el primer elemento que cumpla la condición.
-        return _memoriaDB.FirstOrDefault(todo => todo.Id == id);
-    }
-
-    // Crea una nueva tarea asignándole un Id incremental.
-    public TodoItem CreateTodo(TodoItem newTodo)
-    {
-        // Calcula el próximo Id basado en el máximo actual; si la lista está vacía, usa 1.
-        var newId = _memoriaDB.Any() ?  _memoriaDB.Max(x => x.Id) + 1 : 1;
-        // Asigna el Id al nuevo elemento recibido.
-        newTodo.Id = newId;
-        // Inserta el elemento en la "DB" en memoria.
-        _memoriaDB.Add(newTodo);
-        // Devuelve el elemento creado (incluye su Id).
-        return newTodo;
-    }
-
-    // Actualiza los campos mutables del elemento identificado por 'id'.
-    public void UpdateTodo(long id, TodoItem updatedTodo)
-    {
-        // Busca el elemento existente.
-        var existingTodo = GetTodoById(id);
-        if (existingTodo != null)
+        // Por qué DI aquí: recibimos el DbContext desde fuera para no acoplarnos a detalles de infraestructura.
+        // Esto permite testear y cambiar la implementación sin tocar la lógica de negocio.
+        public TodoServiceImp(TodoDbContext context)
         {
-            // Copia los valores actualizados.
-            existingTodo.Title = updatedTodo.Title;
-            existingTodo.IsComplete = updatedTodo.IsComplete;
+            _context = context;
         }
-    }
 
-    // Elimina el elemento por id (si existe).
-    public void DeleteTodo(long id)
-    {
-        // Busca el elemento objetivo.
-        var todoToRemove = GetTodoById(id);
-        if (todoToRemove != null)
+        // Lista todas las tareas: la cocina le pregunta al bibliotecario por todo el catálogo.
+        public List<TodoItem> GetAllTodos()
         {
-            // Remueve de la colección en memoria.
-            _memoriaDB.Remove(todoToRemove);
+            return _context.TodoItems.ToList(); // Materializamos para no exponer IQueryable hacia capas superiores.
+        }
+
+        // Busca una tarea por id: si no está, devolvemos null para que el mesero responda 404.
+        public TodoItem? GetTodoById(long id)
+        {
+            // Usamos .Find() que es eficiente para claves primarias.
+            return _context.TodoItems.Find(id);
+        }
+
+        // Crea una nueva tarea: la cocina prepara el plato y pide al bibliotecario que lo registre.
+        public TodoItem CreateTodo(TodoItem newTodo)
+        {
+            // 1) No calculamos el Id manualmente: la base lo autogenera.
+            // 2) Añadimos la entidad a la mesa TodoItems.
+            _context.TodoItems.Add(newTodo);
+            // 3) Confirmamos la operación en la base (como sellar el pedido en el libro del bibliotecario).
+            _context.SaveChanges();
+            return newTodo;
+        }
+
+        // Actualiza una tarea existente: si no existe, no hacemos nada.
+        public void UpdateTodo(long id, TodoItem updatedTodo)
+        {
+            var existingTodo = _context.TodoItems.Find(id);
+            if (existingTodo != null)
+            {
+                // Decidimos qué campos actualizar (reglas de negocio simples).
+                existingTodo.Title = updatedTodo.Title;
+                existingTodo.IsComplete = updatedTodo.IsComplete;
+
+                // Guardamos los cambios: el bibliotecario persiste el nuevo estado.
+                _context.SaveChanges();
+            }
+        }
+
+        // Elimina una tarea por id: retiramos el plato de la carta.
+        public void DeleteTodo(long id)
+        {
+            var todoToRemove = _context.TodoItems.Find(id);
+            if (todoToRemove != null)
+            {
+                // Quitamos el registro de la "mesa" TodoItems.
+                _context.TodoItems.Remove(todoToRemove);
+                // Confirmamos la eliminación en la base.
+                _context.SaveChanges();
+            }
         }
     }
 }
