@@ -37,9 +37,19 @@ public class TodoController : ControllerBase // Hereda utilidades para construir
     [HttpGet]
     public IActionResult GetAll()
     {
-        // Llama a la capa de aplicación para obtener los datos.
-        // Ok(...) genera respuesta 200 con el contenido serializado a JSON.
-        return Ok(_todoService.GetAllTodos());
+        var todoItems = _todoService.GetAllTodos();
+        
+        // Proceso de "Mapeo": Convertimos la lista de entidades internas (TodoItem)
+        // a una lista de DTOs publicos (TodoItemDto).
+
+        var todoDtos = todoItems.Select(item => new TodoItemDto
+        {
+            Id = item.Id,
+            Title = item.Title,
+            IsComplete = item.IsComplete
+        }).ToList();
+        
+        return Ok(todoDtos);
     }
 
     // Acción HTTP GET con parámetro de ruta: obtiene una tarea por id.
@@ -47,60 +57,71 @@ public class TodoController : ControllerBase // Hereda utilidades para construir
     [HttpGet("{id}")]
     public IActionResult GetById(long id)
     {
-        // Recupera el recurso desde el servicio (la cocina pregunta al bibliotecario si existe).
-        var todo = _todoService.GetTodoById(id);
-        if (todo == null)
+        var todoItem = _todoService.GetTodoById(id);
+        if (todoItem == null)
         {
-            // Si no existe, responde 404 Not Found (no hay plato con ese id).
             return NotFound();
         }
-
-        // Si existe, responde 200 con el recurso.
-        return Ok(todo);
+        
+        // Mapeo del objeto encontrado a su version DTO.
+        var todoDto = new TodoItemDto
+        {
+            Id = todoItem.Id,
+            Title = todoItem.Title,
+            IsComplete = todoItem.IsComplete
+        };
+            return Ok(todoDto);
     }
 
     // Acción HTTP POST: crea una nueva tarea.
-    // Importante: ahora usamos un DTO (TodoCreateRequest) específico de entrada con validaciones.
-    // Por qué: el "bouncer" (validación de modelo de [ApiController]) puede revisar el pedido ANTES de llegar a la cocina.
     // Ruta efectiva: POST api/v1/Todo
     [HttpPost]
-    public IActionResult Create([FromBody] TodoCreateRequest request)
+    public IActionResult Create([FromBody] TodoItem createDto)
     {
-        // Con [ApiController], si request no cumple las DataAnnotations, ASP.NET Core devuelve 400 automáticamente
-        // con detalles de qué falló. Aquí ya llegamos con un pedido válido.
-        // Mapeamos el DTO (capa transporte) a la entidad de dominio que entiende la cocina (servicio).
-        var newTodo = new TodoItem
+        // Mapeo inverso: Convertimos el DTO que llega del cliente a una entidad 'TodoItem'
+        // que uestra logica de negocio y base de datos entienden.
+        var todoItem = new TodoItem
         {
-            Title = request.Title,
-            IsComplete = request.IsComplete
+            Title = createDto.Title,
+            IsComplete = createDto.IsComplete
         };
 
-        // Delegamos la creación al servicio (la cocina); este puede asignar Id y pedir al bibliotecario que lo guarde.
-        var createdTodo = _todoService.CreateTodo(newTodo);
+        var createdTodo = _todoService.CreateTodo(todoItem);
+        
+        // Creamos un DTO para la respuesta, para mostrarle al cliente el objeto completo con su nuevo Id.
+        var responseDto = new TodoItemDto
+        {
+            Id = createdTodo.Id,
+            Title = createdTodo.Title,
+            IsComplete = createdTodo.IsComplete
+        };
 
-        // Devuelve 201 Created con cabecera Location apuntando al recurso recién creado.
-        // CreatedAtAction usa la acción GetById y pasa el id del nuevo recurso en la ruta.
-        return CreatedAtAction(nameof(GetById), new { id = createdTodo.Id }, createdTodo);
+        return CreatedAtAction(nameof(GetById), new { id = responseDto.Id }, responseDto);
+
     }
 
     // Acción HTTP PUT: reemplaza el estado de una tarea existente.
     // Ruta efectiva: PUT api/v1/Todo/{id}
     [HttpPut("{id}")]
-    public IActionResult Update(long id, [FromBody] TodoItem updatedTodo)
+    public IActionResult Update(long id, [FromBody] TodoItem updatedDto)
     {
-        // Verifica que el recurso exista antes de intentar modificarlo.
+        // Para la actualizacion, no pasamos el DTO directamente al servicio.
+        // Primero, obtenemos la entidad real de la base de datos.
         var existingTodo = _todoService.GetTodoById(id);
         if (existingTodo == null)
         {
             // Si no existe, 404.
             return NotFound();
         }
+        
+        // Actualizamos la entidad que ya existe con los nuevos datos del DTO.
+        existingTodo.Title = updatedDto.Title;
+        existingTodo.IsComplete = updatedDto.IsComplete;
+        
+        // Pasamos la entidad ya actualizada al servicio para que la guarde.
+        _todoService.UpdateTodo(id, existingTodo);
 
-        // Aplica los cambios en la capa de aplicación (la cocina decide cómo actualizar y pide al bibliotecario persistir).
-        _todoService.UpdateTodo(id, updatedTodo);
-
-        // 204 No Content indica éxito sin cuerpo de respuesta.
-        return NoContent();
+        return NoContent(); // No content es la respuesta estandar para un PUT existoso.
     }
 
     // Acción HTTP DELETE: elimina una tarea por id.
@@ -108,21 +129,13 @@ public class TodoController : ControllerBase // Hereda utilidades para construir
     [HttpDelete("{id}")]
     public IActionResult Delete(long id)
     {
-        // Confirmamos que el recurso exista (no intentamos borrar un plato que no está en la carta).
         var existingTodo = _todoService.GetTodoById(id);
         if (existingTodo == null)
         {
-            // Si no existe, 404.
             return NotFound();
         }
-
-        // Solicitamos la eliminación al servicio (la cocina coordina con el bibliotecario para quitarlo de los registros).
+        
         _todoService.DeleteTodo(id);
-
-        // 204 No Content confirma eliminación exitosa.
         return NoContent();
     }
 }
-
-
-
