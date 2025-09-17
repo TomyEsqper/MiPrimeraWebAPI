@@ -1,0 +1,11 @@
+﻿# .NET Core
+[Bb]in/
+[Oo]bj/
+
+# Rider
+.idea/
+*.user
+*.sln.DotSettings.user
+
+# Visual Studio
+.vs/
