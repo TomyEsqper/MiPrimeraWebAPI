@@ -1,5 +1,4 @@
-﻿using AutoMapper;
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using MiPrimeraAPI.application.Service;
 using MiPrimeraAPI.domain.Entity;
 using MiPrimeraAPI.adapter.restful.v1.dto;
@@ -7,30 +6,27 @@ using MiPrimeraAPI.adapter.restful.v1.dto;
 namespace MiPrimeraAPI.adapter.restful.v1.controller;
 
 // Este controlador es el "mesero" profesional del restaurante.
-// Ahora, gracias a Validación, DTOs y AutoMapper, el mesero puede:
+// Ahora, gracias a Validación y DTOs, el mesero puede:
 // 1. Dejar pasar solo pedidos válidos (el "bouncer" revisa los DTOs con reglas de validación).
 // 2. Recibir y entregar "menús" (DTOs) en vez de recetas secretas (entidades de dominio).
-// 3. Usar el "traductor universal" (AutoMapper) para convertir entre menús y recetas sin esfuerzo manual.
+// 3. Realizar conversiones manuales y explícitas entre menús (DTOs) y recetas (entidades).
 [ApiController]
 [Route("api/v1/[controller]")]
 public class TodoController : ControllerBase
 {
-    // El mesero ahora tiene acceso tanto al menú (servicio de tareas) como al traductor universal (AutoMapper).
+    // El mesero ahora tiene acceso al menú (servicio de tareas).
     private readonly ITodoService _todoService;
-    private readonly IMapper _mapper;
 
-    // El constructor recibe el menú (servicio) y el traductor universal (AutoMapper).
-    // Así, el mesero puede traducir cualquier pedido del cliente a la receta secreta y viceversa, de forma profesional y automática.
-    public TodoController(ITodoService todoService, IMapper mapper)
+    // El constructor recibe el menú (servicio).
+    public TodoController(ITodoService todoService)
     {
         _todoService = todoService;
-        _mapper = mapper;
     }
 
     // --- FLUJO PROFESIONAL DE UNA PETICIÓN HTTP ---
     // 1. El cliente hace una petición (por ejemplo, GET, POST, etc.).
     // 2. El "bouncer" (validación automática) revisa el DTO de entrada (si aplica).
-    // 3. El mesero (controller) recibe el DTO y, si es necesario, lo traduce a la receta secreta (entidad de dominio) usando AutoMapper.
+    // 3. El mesero (controller) traduce explícitamente entre DTOs y entidades cuando corresponde.
     // 4. El mesero pasa la receta a la cocina (servicio de dominio).
     // 5. La cocina responde con una receta secreta, que el mesero traduce de vuelta a un DTO para el cliente.
 
@@ -41,8 +37,13 @@ public class TodoController : ControllerBase
     public IActionResult GetAll()
     {
         var todoItems = _todoService.GetAllTodos();
-        // Traducción automática: de recetas secretas (TodoItem) a menús públicos (TodoItemDto).
-        var todoDtos = _mapper.Map<List<TodoItemDto>>(todoItems);
+
+        var todoDtos = new List<TodoItemDto>(todoItems.Count);
+        foreach (var item in todoItems)
+        {
+            todoDtos.Add(ToDto(item));
+        }
+
         return Ok(todoDtos);
     }
 
@@ -57,8 +58,7 @@ public class TodoController : ControllerBase
         {
             return NotFound();
         }
-        var todoDto = _mapper.Map<TodoItemDto>(todoItem);
-        return Ok(todoDto);
+        return Ok(ToDto(todoItem));
     }
 
     // --- ACCIÓN: Crear una nueva tarea ---
@@ -69,19 +69,17 @@ public class TodoController : ControllerBase
     [HttpPost]
     public IActionResult Create([FromBody] CreateTodoDto createDto)
     {
-        // Traducción automática: del menú de entrada (CreateTodoDto) a receta secreta (TodoItem).
-        var todoItem = _mapper.Map<TodoItem>(createDto);
+        var todoItem = FromCreateDto(createDto);
         var createdTodo = _todoService.CreateTodo(todoItem);
-        // Traducción automática: de receta secreta a menú de salida (TodoItemDto).
-        var responseDto = _mapper.Map<TodoItemDto>(createdTodo);
+        var responseDto = ToDto(createdTodo);
         return CreatedAtAction(nameof(GetById), new { id = responseDto.Id }, responseDto);
     }
 
     // --- ACCIÓN: Actualizar una tarea existente ---
     // PUT api/v1/Todo/{id}
-    // El cliente entrega un menú de entrada (TodoItemDto o CreateTodoDto).
+    // El cliente entrega un menú de entrada (CreateTodoDto).
     // El bouncer revisa la validez.
-    // El mesero busca la receta original, aplica los cambios usando el traductor universal, y la cocina actualiza la base.
+    // El mesero busca la receta original y aplica los cambios manualmente, y la cocina actualiza la base.
     [HttpPut("{id}")]
     public IActionResult Update(long id, [FromBody] CreateTodoDto updatedDto)
     {
@@ -90,9 +88,10 @@ public class TodoController : ControllerBase
         {
             return NotFound();
         }
-        // Traducción automática: aplica los cambios del menú de entrada a la receta secreta existente.
-        _mapper.Map(updatedDto, existingTodo);
+
+        UpdateEntityFromDto(updatedDto, existingTodo);
         _todoService.UpdateTodo(id, existingTodo);
+
         return NoContent();
     }
 
@@ -109,5 +108,31 @@ public class TodoController : ControllerBase
         }
         _todoService.DeleteTodo(id);
         return NoContent();
+    }
+
+    // --- Mapeos manuales entre DTOs y Entidades ---
+    private static TodoItemDto ToDto(TodoItem item)
+    {
+        return new TodoItemDto
+        {
+            Id = item.Id,
+            Title = item.Title,
+            IsComplete = item.IsComplete
+        };
+    }
+
+    private static TodoItem FromCreateDto(CreateTodoDto dto)
+    {
+        return new TodoItem
+        {
+            Title = dto.Title,
+            IsComplete = dto.IsComplete
+        };
+    }
+
+    private static void UpdateEntityFromDto(CreateTodoDto dto, TodoItem entity)
+    {
+        entity.Title = dto.Title;
+        entity.IsComplete = dto.IsComplete;
     }
 }

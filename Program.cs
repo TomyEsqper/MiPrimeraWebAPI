@@ -14,10 +14,6 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddDbContext<TodoDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-// ¡NUEVO! Aquí contratamos y activamos al "traductor universal" (AutoMapper) para todo el restaurante.
-// Esto permite que cualquier mesero (controller) pueda pedir traducciones automáticas entre "menús" (DTOs) y "recetas secretas" (entidades de dominio).
-builder.Services.AddAutoMapper(typeof(Program));
-
 // Registro de nuestro servicio de aplicación: Conecta la interfaz con su implementación.
 builder.Services.AddScoped<ITodoService, TodoServiceImp>();
 
